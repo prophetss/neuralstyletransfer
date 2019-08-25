@@ -2,46 +2,63 @@ import d2lzh as d2l
 from mxnet import autograd, gluon, image, init, nd
 from mxnet.gluon import model_zoo, nn
 import time
+import os
+import argparse
 
+parser = argparse.ArgumentParser(description='图片样式迁移')
+parser.add_argument('content_path', type=str, help='内容图片路径')
+parser.add_argument('style_path', type=str, help='样式图片路径')
+parser.add_argument('out_path', type=str, help='输出图片路径')
+parser.add_argument('--out_img_shape', type=str, default="600*400", help='输出图片尺寸')
+parser.add_argument('--style_save_path', type=str, default=None, help='样式结果保存路径，保存后下次可直接读取使用')
+parser.add_argument('--max_epochs', type=int, default=300, help='训练迭代次数')
+parser.add_argument('--content_weight', type=float, default=0.1, help='内容损失权重')
+parser.add_argument('--style_weight', type=float, default=1e5, help='样式损失权重')
+parser.add_argument('--tv_weight', type=float, default=10, help='噪音损失权重')
+
+args = parser.parse_args()
+print(args)
+
+content_path = args.content_path
+style_path = args.style_path
+out_path = args.out_path
+out_img_shape = args.out_img_shape
+style_save_path = args.style_save_path
+max_epochs = args.max_epochs
+content_weight = args.content_weight
+style_weight = args.style_weight
+tv_weight = args.tv_weight
+
+# 输入图像标准化,数据来自Imagenet数据集.
 rgb_mean = nd.array([0.485, 0.456, 0.406])
 rgb_std = nd.array([0.229, 0.224, 0.225])
 
-content_weight, style_weight, tv_weight = 0.01, 1e5, 10
 
-style_layers, content_layers = [0, 5, 10, 19, 28], [25]
-
-content_img_path = "C:\\content.jpg"
-style_img_path = "C:\\style.jpg"
-out_img_path = "C:\\out.jpg"
-
-#输出图片尺寸
-output_image_shape = (600, 400)
-
-lr, max_epochs, lr_decay_epoch = (0.01, 300, 100)
-
-pretrained_net = model_zoo.vision.vgg19(pretrained=True)
-net = nn.Sequential()
-for i in range(max(content_layers + style_layers) + 1):
-    net.add(pretrained_net.features[i])
-
-ctx, image_shape = d2l.try_gpu(), (225, 150)
-net.collect_params().reset_ctx(ctx)
-
-
-def preprocess(img, image_shape):
+def pre_process(img, image_shape):
     img = image.imresize(img, *image_shape)
     img = (img.astype('float32') / 255 - rgb_mean) / rgb_std
     return img.transpose((2, 0, 1)).expand_dims(axis=0)
 
 
-def postprocess(img):
+def post_process(img):
     img = img[0].as_in_context(rgb_std.context)
     return (img.transpose((1, 2, 0)) * rgb_std + rgb_mean).clip(0, 1)
 
 
+# 选取vgg19的block1到5的第一个卷积层提取样式特征，block4的最后一个卷积层提取内容特征
+style_layers, content_layers = [0, 5, 10, 19, 28], [25]
+
+pretrained_net = model_zoo.vision.vgg19(pretrained=True)
+net = nn.Sequential()
+for i in range(max(content_layers + style_layers) + 1):
+    net.add(pretrained_net.features[i])
+ctx = d2l.try_gpu()
+net.collect_params().reset_ctx(ctx)
+
+
 def extract_features(X, content_layers, style_layers):
-    contents = []
-    styles = []
+    # 保存样式和内容所需层的特征结果
+    contents, styles = [], []
     for i in range(len(net)):
         X = net[i](X)
         if i in style_layers:
@@ -52,13 +69,13 @@ def extract_features(X, content_layers, style_layers):
 
 
 def get_contents(content_img, image_shape, ctx):
-    content_X = preprocess(content_img, image_shape).copyto(ctx)
+    content_X = pre_process(content_img, image_shape).copyto(ctx)
     contents_Y, _ = extract_features(content_X, content_layers, style_layers)
     return content_X, contents_Y
 
 
 def get_styles(style_img, image_shape, ctx):
-    style_X = preprocess(style_img, image_shape).copyto(ctx)
+    style_X = pre_process(style_img, image_shape).copyto(ctx)
     _, styles_Y = extract_features(style_X, content_layers, style_layers)
     return style_X, styles_Y
 
@@ -136,16 +153,26 @@ def train(X, contents_Y, styles_Y, ctx, lr, max_epochs, lr_decay_epoch):
     return X
 
 
-image_shape = (output_image_shape[0] // 2, output_image_shape[1] // 2)
-content_img = image.imread(content_img_path)
-style_img = image.imread(style_img_path)
-content_X, contents_Y = get_contents(content_img, image_shape, ctx)
-styles_X, styles_Y = get_styles(style_img, image_shape, ctx)
-output = train(content_X, contents_Y, styles_Y, ctx, lr, max_epochs * 2, lr_decay_epoch * 2)
+lr, lr_decay_epoch = 0.01, 100
 
-_, content_Y = get_contents(content_img, output_image_shape, ctx)
-styles_X, style_Y = get_styles(style_img, output_image_shape, ctx)
-X = preprocess(postprocess(output) * 255, image_shape)
-output = train(X, content_Y, style_Y, ctx, lr, max_epochs, lr_decay_epoch)
 
-d2l.plt.imsave(out_img_path, postprocess(output).asnumpy())
+def process(content_path, style_path, output_shape, style_save_path):
+    content_img, style_img = image.imread(content_path), image.imread(style_path)
+    content_X, contents_Y = get_contents(content_img, output_shape, ctx)
+    if style_save_path:
+        styles_npy = os.path.join(style_save_path, "styles.npy")
+        if os.path.exists(styles_npy):
+            styles_Y = nd.load(styles_npy)
+        else:
+            _, styles_Y = get_styles(style_img, output_shape, ctx)
+            nd.save(styles_npy, styles_Y)
+    else:
+        _, styles_Y = get_styles(style_img, output_shape, ctx)
+    return train(content_X, contents_Y, styles_Y, ctx, lr, max_epochs, lr_decay_epoch)
+
+
+out_img_shape = out_img_shape.split('*')
+output_shape = (int(out_img_shape[0]), int(out_img_shape[1]))
+output = process(content_path, style_path, output_shape, style_save_path)
+
+d2l.plt.imsave(out_path, post_process(output).asnumpy())
