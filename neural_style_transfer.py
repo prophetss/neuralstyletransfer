@@ -26,6 +26,7 @@ out_img_shape = args.out_img_shape
 style_save_path = args.style_save_path
 max_epochs = args.max_epochs
 content_weight = args.content_weight
+content_path = args.content_path
 style_weight = args.style_weight
 tv_weight = args.tv_weight
 
