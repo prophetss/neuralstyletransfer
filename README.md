@@ -3,6 +3,6 @@
 使用：python neural_style_transfer.py -h
 
 效果如下：
-内容图片：![image](https://github.com/prophetss/neuralstyletransfer/images/tw.jpg)
-样式图片：![image](https://github.com/prophetss/neuralstyletransfer/images/style.jpg)
-效果图：![image](https://github.com/prophetss/neuralstyletransfer/images/out.jpg)
+内容图片：![image](https://github.com/prophetss/neuralstyletransfer/blob/master/images/tw.jpg)
+样式图片：![image](https://github.com/prophetss/neuralstyletransfer/blob/master/images/style.jpg)
+效果图：![image](https://github.com/prophetss/neuralstyletransfer/blob/master/images/out.jpg)
